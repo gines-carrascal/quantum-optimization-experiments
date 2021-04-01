@@ -13,6 +13,14 @@ from qiskit.optimization.algorithms import MinimumEigenOptimizer
 from qiskit import execute, Aer
 from qiskit.aqua import aqua_globals
 
+from qiskit import BasicAer
+from qiskit.aqua import aqua_globals, QuantumInstance
+from qiskit.aqua.algorithms import QAOA, NumPyMinimumEigensolver
+from qiskit.optimization.algorithms import MinimumEigenOptimizer, RecursiveMinimumEigenOptimizer
+from qiskit.optimization import QuadraticProgram
+
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 import time
@@ -80,7 +88,6 @@ def optimize_portfolio(dictionary):
         if dictionary['print']:
             print('### quadratic_program_to_qubo:')
             print(qp1.export_as_lp_string())
-            print("Penalty:", conv.penalty)
         
         #quantum preparation
         # set classical optimizer
@@ -88,7 +95,13 @@ def optimize_portfolio(dictionary):
         optimizer = dictionary["optimizer"](maxiter=int(dictionary["maxiter"]))
 
         # set variational ansatz
-        var_form = RealAmplitudes(qp1.get_num_binary_vars(), reps=int(dictionary["depth"]))
+        var_form = RealAmplitudes(
+            qp1.get_num_binary_vars(),
+            insert_barriers=True, 
+            entanglement=dictionary["entanglement"], 
+            reps=int(dictionary["depth"])
+        )
+
         m = var_form.num_parameters
 
         # set backend
@@ -103,6 +116,35 @@ def optimize_portfolio(dictionary):
 
         # initialize optimization algorithm based on CVaR-VQE
         opt_alg = MinimumEigenOptimizer(vqe)
+
+        # solve problem
+        t_00 = time.perf_counter()
+        results = opt_alg.solve(qp1)
+        t_0 = time.perf_counter() - t_00
+        result['computational_time'] = t_0
+        result['result'] = conv.interpret(results)
+
+    elif dictionary['solver'] == 'qaoa':
+        
+        conv = QuadraticProgramToQubo()
+        qp1 = conv.convert(qp)
+        if dictionary['print']:
+            print('### quadratic_program_to_qubo:')
+            print(qp1.export_as_lp_string())
+        
+        #quantum preparation
+        # set classical optimizer
+        
+        quantum_instance = QuantumInstance(BasicAer.get_backend(dictionary["quantum_instance"]))
+    
+        qaoa_mes = QAOA(quantum_instance=quantum_instance)
+        exact_mes = NumPyMinimumEigensolver()
+
+        # initialize optimization algorithm 
+        qaoa = MinimumEigenOptimizer(qaoa_mes)
+        exact = MinimumEigenOptimizer(exact_mes)
+
+        opt_alg = RecursiveMinimumEigenOptimizer(min_eigen_optimizer=qaoa, min_num_vars=1, min_num_vars_optimizer=exact)
 
         # solve problem
         t_00 = time.perf_counter()
